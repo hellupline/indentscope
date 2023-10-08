@@ -1,0 +1,229 @@
+*indentscope* Visualize and work with indent scope
+*Indentscope*
+
+MIT License Copyright (c) 2023 HellUpLine
+
+==============================================================================
+
+Indent scope (or just "scope") is a maximum set of consecutive lines which
+contains certain reference line (cursor line by default) and every member
+has indent not less than certain reference indent ("indent at cursor" by
+default: minimum between cursor column and indent of cursor line).
+
+Features:
+- There are textobjects and motions to operate on scope. Support |count|
+  and dot-repeat (in operator pending mode).
+
+# Setup~
+
+This module needs a setup with `require('indentscope').setup({})`
+(replace `{}` with your `config` table). It will create global Lua table
+`Indentscope` which you can use for scripting or manually (with `:lua
+Indentscope.*`).
+
+See |Indentscope.config| for available config settings.
+
+You can override runtime config settings locally to buffer inside
+`vim.b.miniindentscope_config` which should have same structure as
+`Indentscope.config`. See |nvim-buffer-local-config| for more details.
+
+------------------------------------------------------------------------------
+                                                        *Indentscope.config*
+                            `Indentscope.config`
+Module config
+
+Default values:
+>
+  Indentscope.config = {
+    -- Module mappings. Use `''` (empty string) to disable one.
+    mappings = {
+      -- Textobjects
+      object_scope = 'ii',
+      object_scope_with_border = 'ai',
+
+      -- Motions (jump to respective border line; if not present - body line)
+      goto_top = '[i',
+      goto_bottom = ']i',
+    },
+
+    -- Options which control scope computation
+    options = {
+      -- Type of scope's border: which line(s) with smaller indent to
+      -- categorize as border. Can be one of: 'both', 'top', 'bottom', 'none'.
+      border = 'both',
+
+      -- Whether to use cursor column when computing reference indent.
+      -- Useful to see incremental scopes with horizontal cursor movements.
+      indent_at_cursor = true,
+
+      -- Whether to first check input line to be a border of adjacent scope.
+      -- Use it if you want to place cursor on function header to get scope of
+      -- its body.
+      try_as_border = false,
+    },
+  }
+<
+# Options ~
+
+- Option `indent_at_cursor` controls if cursor position should affect
+  computation of scope. If `true`, reference indent is a minimum of
+  reference line's indent and cursor column. In main example, here how
+  scope's body range differs depending on cursor column and `indent_at_cursor`
+  value (assuming cursor is on line 3 and it is whole buffer):
+>
+    Column\Option true|false
+       1 and 2    2-5 | 2-4
+     3 and more   2-4 | 2-4
+<
+- Option `try_as_border` controls how to act when input line can be
+  recognized as a border of some neighbor indent scope. In main example,
+  when input line is 1 and can be recognized as border for inner scope,
+  value `try_as_border = true` means that inner scope will be returned.
+  Similar, for input line 5 inner scope will be returned if it is
+  recognized as border.
+
+- Option `border` controls which line(s) with smaller indent to categorize
+  as border. This matters for textobjects and motions.
+  It also controls how empty lines are treated: they are included in scope
+  only if followed by a border. Another way of looking at it is that indent
+  of blank line is computed based on value of `border` option.
+  Here is an illustration of how `border` works in presense of empty lines:
+>
+                             |both|bottom|top|none|
+  1|function foo()           | 0  |  0   | 0 | 0  |
+  2|                         | 4  |  0   | 4 | 0  |
+  3|    print('Hello world') | 4  |  4   | 4 | 4  |
+  4|                         | 4  |  4   | 2 | 2  |
+  5|  end                    | 2  |  2   | 2 | 2  |
+<
+  Numbers inside a table are indent values of a line computed with certain
+  value of `border`. So, for example, a scope with reference line 3 and
+  right-most column has body range depending on value of `border` option:
+    - `border` is "both":   range is 2-4, border is 1 and 5 with indent 2.
+    - `border` is "top":    range is 2-3, border is 1 with indent 0.
+    - `border` is "bottom": range is 3-4, border is 5 with indent 0.
+    - `border` is "none":   range is 3-3, border is empty with indent `nil`.
+
+------------------------------------------------------------------------------
+                                                       *Indentscope.setup()*
+                       `Indentscope.setup`({config})
+Module setup
+
+Parameters~
+{config} `(table|nil)` Module config table. See |Indentscope.config|.
+
+Usage~
+`require('indentscope').setup({})` (replace `{}` with your `config` table)
+
+------------------------------------------------------------------------------
+                                                  *Indentscope.textobject()*
+                   `Indentscope.textobject`({use_border})
+Function for textobject mappings
+
+Respects |count| and dot-repeat (in operator-pending mode). Doesn't work
+for scope that is not shown (drawing indent less that zero).
+
+Parameters~
+{use_border} `(boolean|nil)` Whether to include border in textobject. When
+  `true` and `try_as_border` option is `false`, allows "chaining" calls for
+  incremental selection.
+
+------------------------------------------------------------------------------
+                                                    *Indentscope.operator()*
+             `Indentscope.operator`({side}, {add_to_jumplist})
+Function for motion mappings
+
+Move to a certain side of border. Respects |count| and dot-repeat (in
+operator-pending mode). Doesn't move cursor for scope that is not shown
+(drawing indent less that zero).
+
+Parameters~
+{side} `(string)` One of "top" or "bottom".
+{add_to_jumplist} `(boolean|nil)` Whether to add movement to jump list. It is
+  `true` only for Normal mode mappings.
+
+------------------------------------------------------------------------------
+                                                   *Indentscope.get_scope()*
+               `Indentscope.get_scope`({line}, {col}, {opts})
+Compute indent scope
+
+Indent scope (or just "scope") is a maximum set of consecutive lines which
+contains certain reference line (cursor line by default) and every member
+has indent not less than certain reference indent ("indent at column" by
+default). Here "indent at column" means minimum between input column value
+and indent of reference line. When using cursor column, this allows for a
+useful interactive view of nested indent scopes by making horizontal
+movements within line.
+
+Options controlling actual computation is taken from these places in order:
+- Argument `opts`. Use it to ensure independence from other sources.
+- Buffer local variable `vim.b.miniindentscope_config` (`options` field).
+  Useful to define local behavior (for example, for a certain filetype).
+- Global options from |Indentscope.config|.
+
+Algorithm overview~
+
+- Compute reference "indent at column". Reference line is an input `line`
+  which might be modified to one of its neighbors if `try_as_border` option
+  is `true`: if it can be viewed as border of some neighbor scope, it will.
+- Process upwards and downwards from reference line to search for line with
+  indent strictly less than reference one. This is like casting rays up and
+  down from reference line and reference indent until meeting "a wall"
+  (character to the right of indent or buffer edge). Latest line before
+  meeting is a respective end of scope body. It always exists because
+  reference line is a such one.
+- Based on top and bottom lines with strictly lower indent, construct
+  scopes's border. The way it is computed is decided based on `border`
+  option (see |Indentscope.config| for more information).
+- Compute border indent as maximum indent of border lines (or reference
+  indent minus one in case of no border). This is used during drawing
+  visual indicator.
+
+Indent computation~
+
+For every line indent is intended to be computed unambiguously:
+- For "normal" lines indent is an output of |indent()|.
+- Indent is `-1` for imaginary lines 0 and past last line.
+- For blank and empty lines indent is computed based on previous
+  (|prevnonblank()|) and next (|nextnonblank()|) non-blank lines. The way
+  it is computed is decided based on `border` in order to not include blank
+  lines at edge of scope's body if there is no border there. See
+  |Indentscope.config| for a details example.
+
+Parameters~
+{line} `(number|nil)` Input line number (starts from 1). Can be modified to a
+  neighbor if `try_as_border` is `true`. Default: cursor line.
+{col} `(number|nil)` Column number (starts from 1). Default: if
+  `indent_at_cursor` option is `true` - cursor column from `curswant` of
+  |getcurpos()| (allows for more natural behavior on empty lines);
+  `math.huge` otherwise in order to not incorporate cursor in computation.
+{opts} `(table|nil)` Options to override global or buffer local ones (see
+  |Indentscope.config|).
+
+Return~
+`(table)` Table with scope information:
+  - <body> - table with <top> (top line of scope, inclusive), <bottom>
+    (bottom line of scope, inclusive), and <indent> (minimum indent withing
+    scope) keys. Line numbers start at 1.
+  - <border> - table with <top> (line of top border, might be `nil`),
+    <bottom> (line of bottom border, might be `nil`), and <indent> (indent
+    of border) keys. Line numbers start at 1.
+  - <buf_id> - identifier of current buffer.
+  - <reference> - table with <line> (reference line), <column> (reference
+    column), and <indent> ("indent at column") keys.
+
+------------------------------------------------------------------------------
+                                                 *Indentscope.move_cursor()*
+          `Indentscope.move_cursor`({side}, {use_border}, {scope})
+Move cursor within scope
+
+Cursor is placed on a first non-blank character of target line.
+
+Parameters~
+{side} `(string)` One of "top" or "bottom".
+{use_border} `(boolean|nil)` Whether to move to border or withing scope's body.
+  If particular border is absent, body is used.
+{scope} `(table|nil)` Scope to use. Default: output of |Indentscope.get_scope()|.
+
+
+ vim:tw=78:ts=8:noet:ft=help:norl:
